@@ -10,5 +10,8 @@ int main(int argc, char const *argv[]) {
     cout << table.empty() << endl;
 
     cout << ~size_t{} << endl;
+
+
+    cout << table.match() << endl;
     return 0;
 }
