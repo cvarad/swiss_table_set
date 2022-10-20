@@ -2,6 +2,7 @@
 #include <iostream>
 #include <ctime>
 #include <type_traits>
+#include <bit>
 
 #include "hash.h"
 
@@ -9,6 +10,15 @@
 //       2. Range constructor
 
 namespace sst { // sst = simple swiss table
+
+#if defined(__builtin_expect) || \
+    (defined(__GNUC__) && !defined(__clang__))
+#define PREDICT_FALSE(x) (__builtin_expect(false || (x), false))
+#define PREDICT_TRUE(x) (__builtin_expect(false || (x), true))
+#else
+#define PREDICT_FALSE(x) (x)
+#define PREDICT_TRUE(x) (x)
+#endif
 
 // Enum ctrl_t taken from absl::raw_hash_set.h
 // (https://github.com/abseil/abseil-cpp/blob/master/absl/container/internal/raw_hash_set.h)
@@ -98,29 +108,26 @@ public:
     // This is the generic declaration of the hash function. This should work
     // for all primitive types.
     size_t hash(const T &key) const {
-        // if (std::is_fundamental<T>::value) {
-            return wyhash(&key, sizeof key, 0, hash_secret);
-        // }
-        // figure out hashing for custom types
+        return wyhash(&key, sizeof key, 0, hash_secret);
     }
 
-    size_t slot_hash(size_t h) { return h >> 7; }
-    ctrl_t ctrl_hash(size_t h) { return static_cast<ctrl_t>(h & 0x7f); }
+    inline size_t slot_hash(size_t h) { return h >> 7; }
+    inline uint8_t ctrl_hash(size_t h) { return h & 0x7f; }
 
     // matches 16 control bytes to the ctrl_hash of the key
-    uint16_t match(ctrl_t *ctrl_, ctrl_t ctrl_h) {
+    uint16_t match(ctrl_t *ctrl_, uint8_t ctrl_h) const {
         auto match = _mm_set1_epi8(static_cast<char>(ctrl_h));
         auto ctrl_16 = _mm_loadu_si128((__m128i*) ctrl_);
         return _mm_movemask_epi8(_mm_cmpeq_epi8(match, ctrl_16));
     }
 
-    uint16_t match_empty(ctrl_t *ctrl_) {
+    uint16_t match_empty(ctrl_t *ctrl_) const {
         auto match = _mm_set1_epi8(static_cast<char>(ctrl_t::k_empty));
         auto ctrl_16 = _mm_loadu_si128((__m128i*) ctrl_);
         return _mm_movemask_epi8(_mm_cmpeq_epi8(match, ctrl_16));
     }
 
-    uint16_t match_empty_deleted(ctrl_t *ctrl_) {
+    uint16_t match_empty_deleted(ctrl_t *ctrl_) const {
         auto match = _mm_set1_epi8(static_cast<char>(ctrl_t::k_sentinel));
         auto ctrl_16 = _mm_loadu_si128((__m128i*) ctrl_);
         return _mm_movemask_epi8(_mm_cmpgt_epi8(match, ctrl_16));
@@ -166,28 +173,33 @@ public:
     }
 
     iterator<T> find(const T& key) {
-        // std::cout << "looking for: " << key << std::endl;
-
         auto hash_ = hash(key);
-        auto ctrl_h = ctrl_hash(hash_);
-        auto slot_h = slot_hash(hash_);
-
-        size_t g = slot_h % group_cnt_;
+        // size_t g = slot_hash(hash_) % group_cnt_;
+        size_t g = slot_hash(hash_) & (group_cnt_ - 1);
+        size_t probe_size = 1;
         while (true) {
-            // std::cout << "group: " << g << std::endl;
             auto slot_group = slots + g*16;
-            auto matched = match(ctrl + g*16, ctrl_h);
-            // std::cout << "matched: " << matched << std::endl;
-            for (uint8_t i = 0; i < 16; ++i) {
-                if ((matched & 1) && key == *(slot_group + i)) {
-                    return iterator<T>(ctrl + g*16 + i, slot_group + i);
+            auto ctrl_group = ctrl + g*16;
+            auto matched = match(ctrl_group, ctrl_hash(hash_));
+            // for (uint8_t i = 0; i < 16; ++i) {
+            //     if ((matched & 1) && key == *(slot_group + i)) {
+            //         return iterator<T>(ctrl_group + i, slot_group + i);
+            //     }
+            //     matched >>= 1;
+            // }
+
+            uint8_t i;
+            while (matched) {
+                i = std::countr_zero(matched);
+                if (PREDICT_TRUE(key == *(slot_group + i))) {
+                    return {ctrl_group + i, slot_group + i};
                 }
-                matched >>= 1;
+                matched &= (matched - 1);
             }
 
-            // std::cout << "match_empty: " << match_empty(ctrl + g*16) << std::endl;
-            if (match_empty(ctrl + g*16)) return end();
-            g = (g + 1) % group_cnt_;
+            if (PREDICT_TRUE(match_empty(ctrl_group))) return end();
+            g = (g + probe_size) & (group_cnt_ - 1);
+            // ++probe_size;
         }
     }
 
@@ -200,7 +212,7 @@ public:
         // std::cout << "inserting: " << val << std::endl;
 
         ++size_;
-        if (load_factor() >= max_load_factor) {
+        if (load_factor() > max_load_factor) {
             resize();
         }
 
@@ -214,23 +226,31 @@ public:
         auto ctrl_h = ctrl_hash(hash_);
         auto slot_h = slot_hash(hash_);
         
-        size_t g = slot_h % group_cnt_;
+        // size_t g = slot_h % group_cnt_;
+        size_t g = slot_h & (group_cnt_ - 1);
+        size_t probe_size = 1;
         while (true) {
             auto slot_group = slots + g*16;
             auto ctrl_group = ctrl + g*16;
             auto matched = match_empty_deleted(ctrl_group);
-            if (!matched) {
-                g = (g + 1) % group_cnt_;
+            if (PREDICT_FALSE(!matched)) {
+                g = (g + probe_size) % group_cnt_;
+                // ++probe_size;
                 continue;
             }
-            for (uint8_t i = 0; i < 16; i++) {
-                if (matched & 1) {
-                    *(ctrl_group + i) = ctrl_h;
-                    *(slot_group + i) = val;
-                    return;
-                }
-                matched >>= 1;
-            }
+            // for (uint8_t i = 0; i < 16; i++) {
+            //     if (matched & 1) {
+            //         *(ctrl_group + i) = static_cast<ctrl_t>(ctrl_h);
+            //         *(slot_group + i) = val;
+            //         return;
+            //     }
+            //     matched >>= 1;
+            // }
+
+            uint8_t i = std::countr_zero(matched);
+            *(ctrl_group + i) = static_cast<ctrl_t>(ctrl_h);
+            *(slot_group + i) = val;
+            break;
         }
     }
 
@@ -245,12 +265,15 @@ public:
     }
 
     void clear () {
-
+        delete[] ctrl;
+        delete[] slots;
+        capacity_ = 16; group_cnt_ = 1;
+        alloc();
     }
 
     // Iterators
-    iterator<T> begin() { return iterator<T>(ctrl, slots); }
-    iterator<T> end() { return iterator<T>(); }
+    iterator<T> begin() { return {ctrl, slots}; }
+    iterator<T> end() { return {}; }
 };
 
 // This is the template specialized hash function, for std::string.
