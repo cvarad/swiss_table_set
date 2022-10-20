@@ -72,12 +72,12 @@ void test(std::string filename, std::string testname) {
 }
 
 int main(int argc, char const *argv[]) {
-    test<std::string>("tests/words.txt", "Words Test");
+    test<std::string>("tests/words.txt", "Words Test"); // Unique words
+    test<std::string>("tests/oliver_twist.txt", "Words Test <Oliver Twist>"); // Duplicate words
 
     test<int16_t>("tests/short_ints_1000.txt", "Short Ints Test <1000>");
     test<int32_t>("tests/ints_1000.txt", "Ints Test <1000>");
     test<int64_t>("tests/long_ints_1000.txt", "Long Ints Test <1000>");
-
     
     test<int16_t>("tests/short_ints_50000.txt", "Short Ints Test <50000>");
     test<int32_t>("tests/ints_50000.txt", "Ints Test <50000>");

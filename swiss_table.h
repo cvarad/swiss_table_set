@@ -161,10 +161,8 @@ public:
         
         // rehash
         for (; *old_ctrl != ctrl_t::k_sentinel; ++old_ctrl, ++old_slots) {
-            // std::cout << "before continuing" << std::endl;
             if (*old_ctrl < ctrl_t::k_sentinel) // if empty or deleted, do nothing
                 continue;
-            // std::cout << "in this while loop, inserting: " << *old_slots << std::endl;
             insert_nocheck(*old_slots);
         }
 
@@ -174,7 +172,6 @@ public:
 
     iterator<T> find(const T& key) {
         auto hash_ = hash(key);
-        // size_t g = slot_hash(hash_) % group_cnt_;
         size_t g = slot_hash(hash_) & (group_cnt_ - 1);
         size_t probe_size = 1;
         while (true) {
@@ -209,7 +206,6 @@ public:
 
     void insert(const T& val) {
         if (count(val)) return;
-        // std::cout << "inserting: " << val << std::endl;
 
         ++size_;
         if (load_factor() > max_load_factor) {
@@ -220,13 +216,10 @@ public:
     }
 
     void insert_nocheck(const T& val) {
-        // std::cout << "inserting: " << val << std::endl;
-
         auto hash_ = hash(val);
         auto ctrl_h = ctrl_hash(hash_);
         auto slot_h = slot_hash(hash_);
         
-        // size_t g = slot_h % group_cnt_;
         size_t g = slot_h & (group_cnt_ - 1);
         size_t probe_size = 1;
         while (true) {
@@ -261,7 +254,6 @@ public:
         --size_;
         auto ctrl_group = ctrl + (it.ctrl - ctrl) / 16 * 16;
         *it.ctrl = match_empty(ctrl_group) ? ctrl_t::k_empty : ctrl_t::k_deleted;
-        // it.slots.~T();
     }
 
     void clear () {
