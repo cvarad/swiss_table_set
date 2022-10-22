@@ -2,7 +2,7 @@
 This is my simplified implementation of absl::flat_hash_set.
 
 ## Usage
-Just copy over [hash.h]() and [swiss_table.h]() to your directory and import [swiss_table.h]() in your code.
+Just copy over [hash.h](hash.h) and [swiss_table.h](swiss_table.h) to your directory and import swiss_table.h in your code.
 <br/>Example usage:
 ```cpp
 #include "swiss_table.h"
