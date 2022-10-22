@@ -31,7 +31,7 @@ void print_time(std::string operation, int64_t duration) {
     printf("%s: %s%ld μs%s\n", operation.c_str(), GREEN, duration, ANSI_RESET);
 }
 
-template <class T, template <class U> class S>
+template <class T, template <class> class S>
 void benchmark_set(vector<T> &data) {
     S<T> set;
 

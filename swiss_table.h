@@ -6,24 +6,12 @@
 
 #include "hash.h"
 
-// TODO: 1. Support for initializer list
-//       2. Range constructor
-
 namespace sst { // sst = simple swiss table
-
-#if defined(__builtin_expect) || \
-    (defined(__GNUC__) && !defined(__clang__))
-#define PREDICT_FALSE(x) (__builtin_expect(false || (x), false))
-#define PREDICT_TRUE(x) (__builtin_expect(false || (x), true))
-#else
-#define PREDICT_FALSE(x) (x)
-#define PREDICT_TRUE(x) (x)
-#endif
 
 // Enum ctrl_t taken from absl::raw_hash_set.h
 // (https://github.com/abseil/abseil-cpp/blob/master/absl/container/internal/raw_hash_set.h)
 enum class ctrl_t : int8_t {
-    k_empty = -128,
+    k_empty = -128, // 0b
     k_deleted = -2,
     k_sentinel = -1
 };
@@ -103,7 +91,7 @@ public:
         delete[] slots;
     }
 
-public:
+private:
     // We use template specializations for hashing.
     // This is the generic declaration of the hash function. This should work
     // for all primitive types.
@@ -131,15 +119,6 @@ public:
         auto match = _mm_set1_epi8(static_cast<char>(ctrl_t::k_sentinel));
         auto ctrl_16 = _mm_loadu_si128((__m128i*) ctrl_);
         return _mm_movemask_epi8(_mm_cmpgt_epi8(match, ctrl_16));
-    }
-
-public:
-    size_t size() const { return size_; }
-    size_t capacity() const { return capacity_; }
-    bool empty() const { return !size_; }
-    
-    float load_factor() const {
-        return capacity_ ? (float) size_ / capacity_ : 0;
     }
 
     void alloc() {
@@ -170,33 +149,34 @@ public:
         delete[] old_slots_head;
     }
 
+public:
+    size_t size() const { return size_; }
+    size_t capacity() const { return capacity_; }
+    bool empty() const { return !size_; }
+    
+    float load_factor() const {
+        return capacity_ ? (float) size_ / capacity_ : 0;
+    }
+
     iterator<T> find(const T& key) {
         auto hash_ = hash(key);
         size_t g = slot_hash(hash_) & (group_cnt_ - 1);
-        size_t probe_size = 1;
         while (true) {
             auto slot_group = slots + g*16;
             auto ctrl_group = ctrl + g*16;
             auto matched = match(ctrl_group, ctrl_hash(hash_));
-            // for (uint8_t i = 0; i < 16; ++i) {
-            //     if ((matched & 1) && key == *(slot_group + i)) {
-            //         return iterator<T>(ctrl_group + i, slot_group + i);
-            //     }
-            //     matched >>= 1;
-            // }
 
             uint8_t i;
             while (matched) {
                 i = std::countr_zero(matched);
-                if (PREDICT_TRUE(key == *(slot_group + i))) {
+                if (key == *(slot_group + i)) {
                     return {ctrl_group + i, slot_group + i};
                 }
                 matched &= (matched - 1);
             }
 
-            if (PREDICT_TRUE(match_empty(ctrl_group))) return end();
-            g = (g + probe_size) & (group_cnt_ - 1);
-            // ++probe_size;
+            if (match_empty(ctrl_group)) return end();
+            g = (g + 1) & (group_cnt_ - 1);
         }
     }
 
@@ -221,29 +201,18 @@ public:
         auto slot_h = slot_hash(hash_);
         
         size_t g = slot_h & (group_cnt_ - 1);
-        size_t probe_size = 1;
         while (true) {
             auto slot_group = slots + g*16;
             auto ctrl_group = ctrl + g*16;
             auto matched = match_empty_deleted(ctrl_group);
-            if (PREDICT_FALSE(!matched)) {
-                g = (g + probe_size) % group_cnt_;
-                // ++probe_size;
-                continue;
+            if (matched) {
+                uint8_t i = std::countr_zero(matched);
+                *(ctrl_group + i) = static_cast<ctrl_t>(ctrl_h);
+                *(slot_group + i) = val;
+                break;
             }
-            // for (uint8_t i = 0; i < 16; i++) {
-            //     if (matched & 1) {
-            //         *(ctrl_group + i) = static_cast<ctrl_t>(ctrl_h);
-            //         *(slot_group + i) = val;
-            //         return;
-            //     }
-            //     matched >>= 1;
-            // }
 
-            uint8_t i = std::countr_zero(matched);
-            *(ctrl_group + i) = static_cast<ctrl_t>(ctrl_h);
-            *(slot_group + i) = val;
-            break;
+            g = (g + 1) % group_cnt_;
         }
     }
 
