@@ -3,6 +3,7 @@ This is my simplified implementation of absl::flat_hash_set.
 
 ## Usage
 Just copy over [hash.h](hash.h) and [swiss_table.h](swiss_table.h) to your directory and import swiss_table.h in your code.
+<br/>Build your code with the ```-std=c++2a``` flag.
 <br/>Example usage:
 ```cpp
 #include "swiss_table.h"
@@ -27,7 +28,7 @@ int main() {
 ```
 
 ## Tests
-I have created a simple benchmarking test for this project.
+I have created a simple benchmarking test for this project. The test code will work only with g++. For some reason, clang++ fails to recognize the templates.
 <br/>To build and run the tests:
 ```
 make build_test
